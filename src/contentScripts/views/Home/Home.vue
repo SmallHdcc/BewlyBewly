@@ -15,9 +15,10 @@ const mainStore = useMainStore()
 const { handleBackToTop, scrollbarRef } = useBewlyApp()
 const handleThrottledBackToTop = useThrottleFn((targetScrollTop: number = 0) => handleBackToTop(targetScrollTop), 1000)
 
-const activatedPage = ref<HomeSubPage>(HomeSubPage.ForYou)
-const pages = {
-  [HomeSubPage.ForYou]: defineAsyncComponent(() => import('./components/ForYou.vue')),
+type EnabledHomeSubPage = Exclude<HomeSubPage, HomeSubPage.ForYou>
+
+const activatedPage = ref<EnabledHomeSubPage>(HomeSubPage.Trending)
+const pages: Record<EnabledHomeSubPage, ReturnType<typeof defineAsyncComponent>> = {
   [HomeSubPage.Following]: defineAsyncComponent(() => import('./components/Following.vue')),
   [HomeSubPage.SubscribedSeries]: defineAsyncComponent(() => import('./components/SubscribedSeries.vue')),
   [HomeSubPage.Trending]: defineAsyncComponent(() => import('./components/Trending.vue')),
@@ -44,14 +45,22 @@ watch(() => JSON.stringify(settings.value.homePageTabVisibilityList), () => {
 })
 
 function computeTabs(): HomeTab[] {
+  const availablePages = new Set(mainStore.homeTabs.map(tab => tab.page))
+  const hasInvalidTab = settings.value.homePageTabVisibilityList.some(tab => !availablePages.has(tab.page))
+
   // if homePageTabVisibilityList not fresh , set it to default
-  if (!settings.value.homePageTabVisibilityList.length || settings.value.homePageTabVisibilityList.length !== mainStore.homeTabs.length)
+  if (
+    !settings.value.homePageTabVisibilityList.length
+    || settings.value.homePageTabVisibilityList.length !== mainStore.homeTabs.length
+    || hasInvalidTab
+  ) {
     settings.value.homePageTabVisibilityList = mainStore.homeTabs.map(tab => ({ page: tab.page, visible: true }))
+  }
 
   const targetTabs: HomeTab[] = []
 
   for (const tab of settings.value.homePageTabVisibilityList) {
-    tab.visible && targetTabs.push({
+    tab.visible && availablePages.has(tab.page) && targetTabs.push({
       i18nKey: (mainStore.homeTabs.find(defaultTab => defaultTab.page === tab.page) || {})?.i18nKey || tab.page,
       page: tab.page,
     })
@@ -93,7 +102,9 @@ onMounted(() => {
   })
 
   currentTabs.value = computeTabs()
-  activatedPage.value = currentTabs.value[0].page
+  const preferredTab = currentTabs.value.find(tab => tab.page === HomeSubPage.Trending) ?? currentTabs.value[0]
+  if (preferredTab && isEnabledHomeSubPage(preferredTab.page))
+    activatedPage.value = preferredTab.page
 })
 
 onUnmounted(() => {
@@ -122,11 +133,16 @@ function handleChangeTab(tab: HomeTab) {
   if (tabContentLoading.value)
     toggleTabContentLoading(false)
 
-  activatedPage.value = tab.page
+  if (isEnabledHomeSubPage(tab.page))
+    activatedPage.value = tab.page
 }
 
 function toggleTabContentLoading(loading: boolean) {
   tabContentLoading.value = loading
+}
+
+function isEnabledHomeSubPage(page: HomeSubPage): page is EnabledHomeSubPage {
+  return page in pages
 }
 </script>
 
